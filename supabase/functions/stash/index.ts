@@ -120,14 +120,21 @@ async function embed(text: string): Promise<number[] | null> {
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 const BOT_UA = "Mozilla/5.0 (compatible; StashBot/1.0; +https://github.com/quruquruyuki/stash)";
 async function fetchPage(url: string, ua = UA) {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 15000);
-  try {
-    const r = await fetch(url, { headers: { "User-Agent": ua, "Accept-Language": "ja,en;q=0.8" }, redirect: "follow", signal: ctl.signal });
-    const type = r.headers.get("content-type") ?? "";
-    const buf = new Uint8Array(await r.arrayBuffer());
-    return { ok: r.ok, status: r.status, type, buf, finalUrl: r.url || url };
-  } finally { clearTimeout(timer); }
+  // 遅いサイトもあるので25秒まで待ち、時間切れなら1回だけやり直す
+  for (let i = 0; ; i++) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 25000);
+    try {
+      const r = await fetch(url, { headers: { "User-Agent": ua, "Accept-Language": "ja,en;q=0.8" }, redirect: "follow", signal: ctl.signal });
+      const type = r.headers.get("content-type") ?? "";
+      const buf = new Uint8Array(await r.arrayBuffer());
+      return { ok: r.ok, status: r.status, type, buf, finalUrl: r.url || url };
+    } catch (e) {
+      const timeout = ctl.signal.aborted || (e instanceof Error && /abort/i.test(e.name + e.message));
+      if (timeout && i === 0) continue;
+      throw new Error(timeout ? "ページの読み込みに時間がかかりすぎました" : `ページを開けませんでした（${e instanceof Error ? e.message : e}）`);
+    } finally { clearTimeout(timer); }
+  }
 }
 function decodeHtml(buf: Uint8Array, type: string) {
   let cs = /charset=([\w-]+)/i.exec(type)?.[1];
