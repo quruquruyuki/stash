@@ -294,7 +294,7 @@ function saveView() { try { localStorage.setItem(VIEW_KEY, JSON.stringify(view))
 applyView();
 
 async function loadTiles() {
-  const { data, error } = await sb.from("stash_tiles").select("id,item_id,url,title,x,y,w,h,shot_path,prev_shot_path,shot_at,changes,changed_at,unseen,error,active").order("created_at");
+  const { data, error } = await sb.from("stash_tiles").select("id,item_id,url,title,x,y,w,h,shot_path,prev_shot_path,shot_at,changes,changed_at,unseen,error,active,crop_y,watch_from,watch_to").order("created_at");
   if (error) { toast("キャンバスを読み込めませんでした"); return; }
   tiles = data || [];
   await ensureUrls(tiles.map(t => t.shot_path));
@@ -302,7 +302,7 @@ async function loadTiles() {
 }
 function tileHtml(t) {
   const img = urls[t.shot_path];
-  const body = img ? `<div class="img" style="background-image:url('${esc(img)}')"></div>`
+  const body = img ? `<div class="shot"><img src="${esc(img)}" alt="" draggable="false" style="transform:translateY(-${(t.crop_y || 0) * 100}%)"></div>`
     : `<div class="img">${t.error ? esc(t.error) : t.shot_at ? "スクショなし" : `<span><span class="spin"></span><br>撮影中…</span>`}</div>`;
   return `<div class="tile ${t.unseen ? "changed" : ""}" data-tile="${t.id}" style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px">
     <div class="bar">${t.unseen ? `<span class="dot"></span>` : ""}<b>${esc(t.title || t.url)}</b><span class="when">${t.unseen ? "変化あり" : fmtWhen(t.shot_at)}</span></div>
@@ -433,9 +433,12 @@ async function openTile(t) {
     ${t.prev_shot_path && urls[t.prev_shot_path] ? `<div class="seg" id="shotSeg"><button class="on" data-s="now">今回</button><button data-s="prev">前回</button></div>` : ""}
     ${urls[t.shot_path] ? `<img class="hero" id="tileImg" src="${esc(urls[t.shot_path])}" alt="">` : ""}
     ${diff ? `<label class="l">前回から変わった文字（${fmtDate(ch.at)}）</label>${diff}` : `<div class="kv">文字の変化は見つかっていません</div>`}
+    <div class="kv">見張る範囲：${t.watch_from || t.watch_to ? `「${esc((t.watch_from || "最初").slice(0, 24))}」〜「${esc((t.watch_to || "最後").slice(0, 24))}」` : "ページ全体"}</div>
     <div class="acts">
       <a class="btn ac" href="${esc(t.url)}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">サイトを開く</a>
       <button class="btn ghost" id="tShoot">撮り直す</button>
+      ${urls[t.shot_path] ? `<button class="btn ghost" id="tCrop">表示する位置を選ぶ</button>` : ""}
+      <button class="btn ghost" id="tWatch">見張る範囲を選ぶ</button>
       ${!t.item_id && !items.some(i => i.url === t.url) ? `<button class="btn ghost" id="tStock">ストックにも保存</button>` : ""}
       <button class="btn danger" id="tDel">キャンバスから外す</button>
     </div>`;
@@ -457,6 +460,9 @@ async function openTile(t) {
     catch (err) { toast(err.message); }
     closeSheet("tileSheet"); await loadTiles();
   };
+  const tc = $("tCrop");
+  if (tc) tc.onclick = () => pickCrop(t);
+  $("tWatch").onclick = () => pickWatch(t);
   const st = $("tStock");
   if (st) st.onclick = async () => { closeSheet("tileSheet"); showTab("list"); await saveOne({ url: t.url }, t.title || t.url); await loadItems(); };
   $("tDel").onclick = async () => {
@@ -465,6 +471,67 @@ async function openTile(t) {
     const ps = [t.shot_path, t.prev_shot_path].filter(Boolean); if (ps.length) sb.storage.from(BUCKET).remove(ps);
     tiles = tiles.filter(x => x.id !== t.id); renderTiles(); closeSheet("tileSheet");
   };
+}
+
+// 表示する位置：ページ全体のスクショをスクロールして、タイルに出したいところで決める
+function pickCrop(t) {
+  $("tilePane").innerHTML = `
+    <div class="head"><b>表示する位置を選ぶ</b><button class="x" data-close>閉じる</button></div>
+    <p class="mu" style="font-size:13px;margin:0 0 8px">見たいところが枠の一番上に来るようにスクロールして「ここにする」を押してください。</p>
+    <div id="cropBox" style="height:58vh;overflow:auto;border-radius:12px;border:2px solid var(--ac);background:var(--soft);-webkit-overflow-scrolling:touch">
+      <img id="cropImg" src="${esc(urls[t.shot_path])}" style="width:100%;display:block" alt="">
+    </div>
+    <div class="row"><button class="btn ghost" id="cropTop">一番上に戻す</button><button class="btn ac" id="cropOk">ここにする</button></div>`;
+  const box = $("cropBox"), img = $("cropImg");
+  const go = () => { box.scrollTop = (t.crop_y || 0) * img.offsetHeight; };
+  if (img.complete) go(); else img.onload = go;
+  const save = async y => {
+    t.crop_y = Math.max(0, Math.min(0.98, y));
+    const { error } = await sb.from("stash_tiles").update({ crop_y: t.crop_y }).eq("id", t.id);
+    if (error) { toast("保存できませんでした"); return; }
+    const el = tileEl(t.id); if (el) el.outerHTML = tileHtml(t);
+    closeSheet("tileSheet"); toast("表示する位置を変えました");
+  };
+  $("cropOk").onclick = () => save(img.offsetHeight ? box.scrollTop / img.offsetHeight : 0);
+  $("cropTop").onclick = () => save(0);
+}
+
+// 見張る範囲：ページの文字の中から「ここから」「ここまで」の行を選ぶ
+async function pickWatch(t) {
+  const { data } = await sb.from("stash_tiles").select("last_text").eq("id", t.id).maybeSingle();
+  const lines = (data?.last_text || "").split("\n").filter(Boolean).slice(0, 800);
+  if (!lines.length) { toast("まだページの文字を取れていません。撮り直してからもう一度どうぞ"); return; }
+  let a = t.watch_from ? lines.findIndex(l => l.includes(t.watch_from)) : -1;
+  let b = t.watch_to ? lines.findIndex((l, k) => k >= Math.max(a, 0) && l.includes(t.watch_to)) : -1;
+  $("tilePane").innerHTML = `
+    <div class="head"><b>見張る範囲を選ぶ</b><button class="x" data-close>閉じる</button></div>
+    <p class="mu" style="font-size:13px;margin:0 0 8px;line-height:1.7">ページの文字です。見張りたい部分の<b>最初の行</b>と<b>最後の行</b>をタップしてください。広告やランキングのように毎回変わる部分を外すと、関係ない「変化あり」が出なくなります。</p>
+    <div id="wList" style="max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)"></div>
+    <div class="row"><button class="btn ghost" id="wAll">ページ全体にする</button><button class="btn ac" id="wOk">この範囲にする</button></div>`;
+  const draw = () => {
+    $("wList").innerHTML = lines.map((l, i) => {
+      const inR = a >= 0 && i >= a && i <= (b >= 0 ? b : a);
+      const mark = i === a ? "ここから " : i === b ? "ここまで " : "";
+      return `<button data-i="${i}" style="display:block;width:100%;text-align:left;border:none;border-bottom:1px solid var(--soft);padding:7px 10px;font-size:13px;line-height:1.5;background:${inR ? "var(--acs)" : "none"}">${mark ? `<b style="color:var(--ac)">${mark}</b>` : ""}${esc(l.slice(0, 120))}</button>`;
+    }).join("");
+  };
+  draw();
+  const first = $("wList").querySelector(`[data-i="${Math.max(a, 0)}"]`); if (first && a > 2) first.scrollIntoView({ block: "center" });
+  $("wList").onclick = e => {
+    const btn = e.target.closest("[data-i]"); if (!btn) return;
+    const i = +btn.dataset.i;
+    if (a < 0 || b >= 0) { a = i; b = -1; } else if (i < a) { b = a; a = i; } else b = i;
+    const keep = $("wList").scrollTop; draw(); $("wList").scrollTop = keep;
+  };
+  const save = async (from, to) => {
+    const { error } = await sb.from("stash_tiles").update({ watch_from: from, watch_to: to, unseen: false, changes: null }).eq("id", t.id);
+    if (error) { toast("保存できませんでした"); return; }
+    Object.assign(t, { watch_from: from, watch_to: to, unseen: false, changes: null });
+    const el = tileEl(t.id); if (el) el.outerHTML = tileHtml(t);
+    closeSheet("tileSheet"); toast(from || to ? "この範囲だけ見張ります" : "ページ全体を見張ります");
+  };
+  $("wOk").onclick = () => { if (a < 0) { toast("最初の行をタップしてください"); return; } save(lines[a].slice(0, 80), lines[b >= 0 ? b : a].slice(0, 80)); };
+  $("wAll").onclick = () => save(null, null);
 }
 
 /* ---------- タブ ---------- */
