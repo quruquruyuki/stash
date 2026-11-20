@@ -435,35 +435,22 @@ function watchSlice(lines: string[], from?: string | null, to?: string | null) {
   if (to) { const j = lines.findIndex((l, k) => k >= a && l.includes(to)); if (j >= 0) b = j + 1; }
   return lines.slice(a, b);
 }
-// 1枚のページ全体のスクショを撮る（microlink → だめなら Google PageSpeed）
+// 1枚のページ全体のスクショを撮る（microlink の無料枠）
+// サイトに断られたときは BLOCKED を投げる（そのタイルは文字で表示する）
+const BLOCKED = "BLOCKED";
 async function screenshot(url: string): Promise<{ bytes: Uint8Array; type: string }> {
-  let why = "";
-  try {
-    const api = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&fullPage=true&meta=false&viewport.width=1280&viewport.height=900&viewport.deviceScaleFactor=1&waitUntil=networkidle2&type=jpeg`;
-    const r = await fetch(api);
-    // deno-lint-ignore no-explicit-any
-    const d: any = await r.json().catch(() => ({}));
-    const shot = d?.data?.screenshot?.url;
-    const blocked = Number(d?.statusCode ?? 200) >= 400;
-    if (shot && !blocked) {
-      const img = await fetch(shot);
-      if (img.ok) return { bytes: new Uint8Array(await img.arrayBuffer()), type: img.headers.get("content-type") || "image/jpeg" };
-    }
-    why = blocked ? `サイトに断られました（${d.statusCode}）` : (d?.message || `microlink ${r.status}`);
-  } catch (e) { why = e instanceof Error ? e.message : String(e); }
-  // 予備：Google PageSpeed Insights のページ全体スクショ
-  try {
-    const r = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?category=performance&strategy=desktop&url=${encodeURIComponent(url)}`);
-    // deno-lint-ignore no-explicit-any
-    const d: any = await r.json().catch(() => ({}));
-    const a = d?.lighthouseResult?.fullPageScreenshot?.screenshot?.data || d?.lighthouseResult?.audits?.["final-screenshot"]?.details?.data;
-    if (typeof a === "string" && a.startsWith("data:")) {
-      const type = a.slice(5, a.indexOf(";")) || "image/jpeg";
-      return { bytes: fromB64(a), type };
-    }
-    why += ` / 予備も失敗（${d?.error?.message ?? r.status}）`;
-  } catch (e) { why += ` / 予備も失敗（${e instanceof Error ? e.message : e}）`; }
-  throw new Error(`スクショを撮れませんでした：${why}`);
+  const api = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&fullPage=true&meta=true&viewport.width=1280&viewport.height=900&viewport.deviceScaleFactor=1&waitUntil=networkidle2&type=jpeg`;
+  const r = await fetch(api);
+  // deno-lint-ignore no-explicit-any
+  const d: any = await r.json().catch(() => ({}));
+  const title = String(d?.data?.title ?? "");
+  const code = Number(d?.statusCode ?? 0);
+  if (code >= 400 || /^(403|forbidden|access denied|attention required|just a moment|アクセスが拒否)/i.test(title.trim())) throw new Error(BLOCKED);
+  const shot = d?.data?.screenshot?.url;
+  if (!shot) throw new Error(d?.message || `スクショを撮れませんでした（${r.status}）`);
+  const img = await fetch(shot);
+  if (!img.ok) throw new Error("スクショを保存できませんでした");
+  return { bytes: new Uint8Array(await img.arrayBuffer()), type: img.headers.get("content-type") || "image/jpeg" };
 }
 // deno-lint-ignore no-explicit-any
 async function shootTile(t: any) {
@@ -487,9 +474,10 @@ async function shootTile(t: any) {
       if (added.length || removed.length) { patch.changes = { added, removed, at: now }; patch.changed_at = now; patch.unseen = true; }
     }
     patch.text_hash = await sha256(text); patch.last_text = text;
+    patch.excerpt = watchSlice(lines, t.watch_from, t.watch_to).slice(0, 80).join("\n").slice(0, 4000);
   } catch (e) { patch.error = e instanceof Error ? e.message : String(e); }
-  // 2) ページ全体のスクショ
-  try {
+  // 2) ページ全体のスクショ（文字で表示するタイルは撮らない＝無料枠の節約）
+  if (t.view_mode !== "text") try {
     const { bytes, type } = await screenshot(t.url);
     const path = `${t.user_id}/tiles/${t.id}-${Date.now()}.${type.includes("webp") ? "webp" : type.includes("png") ? "png" : "jpg"}`;
     const { error } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: type });
@@ -500,7 +488,8 @@ async function shootTile(t: any) {
     patch.shot_path = path;
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
-    patch.error = patch.error ? `${patch.error} / ${m}` : m;
+    if (m === BLOCKED) patch.view_mode = "text"; // スクショを断るサイトは文字で表示する
+    else patch.error = patch.error ? `${patch.error} / ${m}` : m;
   }
   await admin.from("stash_tiles").update(patch).eq("id", t.id);
   return { id: t.id as string, error: (patch.error ?? null) as string | null, changed: !!patch.changes };

@@ -294,7 +294,7 @@ function saveView() { try { localStorage.setItem(VIEW_KEY, JSON.stringify(view))
 applyView();
 
 async function loadTiles() {
-  const { data, error } = await sb.from("stash_tiles").select("id,item_id,url,title,x,y,w,h,shot_path,prev_shot_path,shot_at,changes,changed_at,unseen,error,active,crop_y,watch_from,watch_to").order("created_at");
+  const { data, error } = await sb.from("stash_tiles").select("id,item_id,url,title,x,y,w,h,shot_path,prev_shot_path,shot_at,changes,changed_at,unseen,error,active,crop_y,watch_from,watch_to,view_mode,excerpt").order("created_at");
   if (error) { toast("キャンバスを読み込めませんでした"); return; }
   tiles = data || [];
   await ensureUrls(tiles.map(t => t.shot_path));
@@ -302,7 +302,7 @@ async function loadTiles() {
 }
 function tileHtml(t) {
   const img = urls[t.shot_path];
-  const body = img ? `<div class="shot"><img src="${esc(img)}" alt="" draggable="false" style="transform:translateY(-${(t.crop_y || 0) * 100}%)"></div>`
+  const body = t.view_mode === "text" ? `<div class="txt">${t.excerpt ? esc(t.excerpt) : "まだ文字を取れていません"}</div>` : img ? `<div class="shot"><img src="${esc(img)}" alt="" draggable="false" style="transform:translateY(-${(t.crop_y || 0) * 100}%)"></div>`
     : `<div class="img">${t.error ? esc(t.error) : t.shot_at ? "スクショなし" : `<span><span class="spin"></span><br>撮影中…</span>`}</div>`;
   return `<div class="tile ${t.unseen ? "changed" : ""}" data-tile="${t.id}" style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px">
     <div class="bar">${t.unseen ? `<span class="dot"></span>` : ""}<b>${esc(t.title || t.url)}</b><span class="when">${t.unseen ? "変化あり" : fmtWhen(t.shot_at)}</span></div>
@@ -431,13 +431,15 @@ async function openTile(t) {
     <div class="kv"><a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.url)}</a></div>
     ${t.error ? `<div class="kv" style="color:var(--warn)">${esc(t.error)}</div>` : ""}
     ${t.prev_shot_path && urls[t.prev_shot_path] ? `<div class="seg" id="shotSeg"><button class="on" data-s="now">今回</button><button data-s="prev">前回</button></div>` : ""}
-    ${urls[t.shot_path] ? `<img class="hero" id="tileImg" src="${esc(urls[t.shot_path])}" alt="">` : ""}
+    ${t.view_mode === "text" ? `<p class="kv">${t.shot_path ? "" : "このサイトはスクショを断っているので、"}ページの文字を表示しています。</p>` : ""}
+    ${t.view_mode !== "text" && urls[t.shot_path] ? `<img class="hero" id="tileImg" src="${esc(urls[t.shot_path])}" alt="">` : ""}
     ${diff ? `<label class="l">前回から変わった文字（${fmtDate(ch.at)}）</label>${diff}` : `<div class="kv">文字の変化は見つかっていません</div>`}
     <div class="kv">見張る範囲：${t.watch_from || t.watch_to ? `「${esc((t.watch_from || "最初").slice(0, 24))}」〜「${esc((t.watch_to || "最後").slice(0, 24))}」` : "ページ全体"}</div>
     <div class="acts">
       <a class="btn ac" href="${esc(t.url)}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">サイトを開く</a>
       <button class="btn ghost" id="tShoot">撮り直す</button>
-      ${urls[t.shot_path] ? `<button class="btn ghost" id="tCrop">表示する位置を選ぶ</button>` : ""}
+      ${t.view_mode !== "text" && urls[t.shot_path] ? `<button class="btn ghost" id="tCrop">表示する位置を選ぶ</button>` : ""}
+      <button class="btn ghost" id="tMode">${t.view_mode === "text" ? "スクショで表示" : "文字で表示"}</button>
       <button class="btn ghost" id="tWatch">見張る範囲を選ぶ</button>
       ${!t.item_id && !items.some(i => i.url === t.url) ? `<button class="btn ghost" id="tStock">ストックにも保存</button>` : ""}
       <button class="btn danger" id="tDel">キャンバスから外す</button>
@@ -459,6 +461,14 @@ async function openTile(t) {
     try { const r = await call("shoot", { ids: [t.id] }); const x = r.results?.[0]; toast(x?.error ? `一部失敗：${x.error}` : x?.changed ? "変化がありました" : "撮り直しました"); }
     catch (err) { toast(err.message); }
     closeSheet("tileSheet"); await loadTiles();
+  };
+  $("tMode").onclick = async () => {
+    const mode = t.view_mode === "text" ? "shot" : "text";
+    const { error } = await sb.from("stash_tiles").update({ view_mode: mode }).eq("id", t.id);
+    if (error) { toast("切り替えられませんでした"); return; }
+    t.view_mode = mode; const el = tileEl(t.id); if (el) el.outerHTML = tileHtml(t);
+    closeSheet("tileSheet");
+    if (mode === "shot" && !t.shot_path) { toast("スクショを撮っています"); try { await call("shoot", { ids: [t.id] }); } catch (err) { toast(err.message); } await loadTiles(); }
   };
   const tc = $("tCrop");
   if (tc) tc.onclick = () => pickCrop(t);
@@ -524,9 +534,12 @@ async function pickWatch(t) {
     const keep = $("wList").scrollTop; draw(); $("wList").scrollTop = keep;
   };
   const save = async (from, to) => {
-    const { error } = await sb.from("stash_tiles").update({ watch_from: from, watch_to: to, unseen: false, changes: null }).eq("id", t.id);
+    const ia = from ? lines.findIndex(l => l.includes(from)) : 0;
+    const ib = to ? lines.findIndex((l, k) => k >= Math.max(ia, 0) && l.includes(to)) : -1;
+    const excerpt = lines.slice(Math.max(ia, 0), ib >= 0 ? ib + 1 : undefined).slice(0, 80).join("\n").slice(0, 4000);
+    const { error } = await sb.from("stash_tiles").update({ watch_from: from, watch_to: to, unseen: false, changes: null, excerpt }).eq("id", t.id);
     if (error) { toast("保存できませんでした"); return; }
-    Object.assign(t, { watch_from: from, watch_to: to, unseen: false, changes: null });
+    Object.assign(t, { watch_from: from, watch_to: to, unseen: false, changes: null, excerpt });
     const el = tileEl(t.id); if (el) el.outerHTML = tileHtml(t);
     closeSheet("tileSheet"); toast(from || to ? "この範囲だけ見張ります" : "ページ全体を見張ります");
   };
