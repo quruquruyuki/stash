@@ -17,6 +17,7 @@
   - スクショ：microlink の無料枠（1日50回まで）
   - 自動撮影：pg_cron のジョブ `stash-daily-shoot`（毎日 21:07 UTC ＝ 6:07 JST）
 - Secrets（他アプリと共用）：`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`ALLOWED_EMAIL`
+- 任意の Secret：`GOOGLE_PSI_KEY`（Google PageSpeed Insights の APIキー。microlink で撮れないときの予備）
 
 ## iPhone の共有ボタンから保存する
 

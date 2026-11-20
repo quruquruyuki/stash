@@ -23,6 +23,7 @@ function env(name: string, ...aliases: string[]): string {
 const ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", "CLAUDE_API_KEY");
 const OPENAI_API_KEY = env("OPENAI_API_KEY", "OPENAI_KEY");
 const ALLOWED_EMAIL = env("ALLOWED_EMAIL").toLowerCase();
+const GOOGLE_PSI_KEY = env("GOOGLE_PSI_KEY", "PAGESPEED_API_KEY", "GOOGLE_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
@@ -435,10 +436,10 @@ function watchSlice(lines: string[], from?: string | null, to?: string | null) {
   if (to) { const j = lines.findIndex((l, k) => k >= a && l.includes(to)); if (j >= 0) b = j + 1; }
   return lines.slice(a, b);
 }
-// 1枚のページ全体のスクショを撮る（microlink の無料枠）
-// サイトに断られたときは BLOCKED を投げる（そのタイルは文字で表示する）
+// 1枚のページ全体のスクショを撮る（microlink の無料枠 → だめなら Google PageSpeed Insights）
+// どちらでも撮れずサイトに断られたときは BLOCKED を投げる（そのタイルは文字で表示する）
 const BLOCKED = "BLOCKED";
-async function screenshot(url: string): Promise<{ bytes: Uint8Array; type: string }> {
+async function microlink(url: string): Promise<{ bytes: Uint8Array; type: string }> {
   const api = `https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&fullPage=true&meta=true&viewport.width=1280&viewport.height=900&viewport.deviceScaleFactor=1&waitUntil=networkidle2&type=jpeg`;
   const r = await fetch(api);
   // deno-lint-ignore no-explicit-any
@@ -451,6 +452,27 @@ async function screenshot(url: string): Promise<{ bytes: Uint8Array; type: strin
   const img = await fetch(shot);
   if (!img.ok) throw new Error("スクショを保存できませんでした");
   return { bytes: new Uint8Array(await img.arrayBuffer()), type: img.headers.get("content-type") || "image/jpeg" };
+}
+// Google PageSpeed Insights（自分のAPIキーがあるときだけ使う。キーなしは世界中で共用の枠なのですぐ尽きる）
+async function pagespeed(url: string): Promise<{ bytes: Uint8Array; type: string }> {
+  const r = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?category=performance&strategy=desktop&key=${encodeURIComponent(GOOGLE_PSI_KEY)}&url=${encodeURIComponent(url)}`);
+  // deno-lint-ignore no-explicit-any
+  const d: any = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`PageSpeed：${d?.error?.message ?? r.status}`);
+  const a = d?.lighthouseResult?.fullPageScreenshot?.screenshot?.data || d?.lighthouseResult?.audits?.["final-screenshot"]?.details?.data;
+  if (typeof a !== "string" || !a.startsWith("data:")) throw new Error("PageSpeed：スクショが返ってきませんでした");
+  return { bytes: fromB64(a), type: a.slice(5, a.indexOf(";")) || "image/jpeg" };
+}
+async function screenshot(url: string): Promise<{ bytes: Uint8Array; type: string }> {
+  try { return await microlink(url); }
+  catch (e) {
+    if (!GOOGLE_PSI_KEY) throw e;
+    try { return await pagespeed(url); }
+    catch (e2) {
+      console.error("pagespeed", e2);
+      throw e; // microlink で断られていれば BLOCKED のまま（文字表示に切り替わる）
+    }
+  }
 }
 // deno-lint-ignore no-explicit-any
 async function shootTile(t: any) {
