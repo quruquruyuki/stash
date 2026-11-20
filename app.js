@@ -357,13 +357,16 @@ $("fitBtn").onclick = () => {
 };
 $("shootAll").onclick = async () => {
   if (!tiles.length) return;
-  const b = $("shootAll"); b.disabled = true; b.innerHTML = `<span class="spin"></span> 撮影中`;
-  toast(`${tiles.length}件を撮り直しています。1件20秒ほどかかります`, 4000);
-  try {
-    const r = await call("shoot");
-    const ch = (r.results || []).filter(x => x.changed).length, er = (r.results || []).filter(x => x.error).length;
-    toast(`撮り直しました${ch ? `。${ch}件に変化あり` : ""}${er ? `（${er}件は失敗）` : ""}`, 3500);
-  } catch (err) { toast(err.message); }
+  const b = $("shootAll"); b.disabled = true;
+  // 1件ずつ頼む（まとめて頼むと関数の時間制限を超えるため）
+  let ch = 0, er = 0;
+  const list = [...tiles];
+  for (let i = 0; i < list.length; i++) {
+    b.innerHTML = `<span class="spin"></span> ${i + 1}/${list.length}`;
+    try { const r = await call("shoot", { ids: [list[i].id] }); const x = r.results?.[0]; if (x?.changed) ch++; if (x?.error) er++; }
+    catch { er++; }
+  }
+  toast(`撮り直しました${ch ? `。${ch}件に変化あり` : ""}${er ? `（${er}件は一部失敗）` : ""}`, 3500);
   b.disabled = false; b.textContent = "撮り直す";
   await loadTiles();
 };

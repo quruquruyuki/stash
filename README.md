@@ -15,7 +15,7 @@
   - 要約・タグ・質問への回答：Claude（モデルは共通設定 `app_settings` の `stash/summary_model`・`answer_model`）
   - 意味検索：OpenAI の埋め込み（`stash/embed_model`）＋ pgvector
   - スクショ：microlink の無料枠（1日50回まで）
-  - 自動撮影：pg_cron のジョブ `stash-daily-shoot`（毎日 21:07 UTC ＝ 6:07 JST）
+  - 自動撮影：pg_cron のジョブ `stash-daily-shoot`（6:00〜7:55 JST に5分おき、20時間以上撮っていないタイルを3件ずつ）
 - Secrets（他アプリと共用）：`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`ALLOWED_EMAIL`
 - 任意の Secret：`GOOGLE_PSI_KEY`（Google PageSpeed Insights の APIキー。microlink で撮れないときの予備）
 

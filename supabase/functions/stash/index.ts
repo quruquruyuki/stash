@@ -533,6 +533,16 @@ async function shoot(who: Who | null, ids?: string[]) {
   return { results };
 }
 
+// 自動撮影：前回から20時間以上たったタイルを3件ずつ撮る（関数の時間制限に収めるため。cron が5分おきに呼ぶ）
+async function shootDue() {
+  const since = new Date(Date.now() - 20 * 3600 * 1000).toISOString();
+  const { data: tiles } = await admin.from("stash_tiles").select("*").eq("active", true)
+    .or(`shot_at.is.null,shot_at.lt.${since}`).order("shot_at", { ascending: true, nullsFirst: true }).limit(3);
+  const results = [];
+  for (const t of tiles ?? []) results.push(await shootTile(t));
+  return { results };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -545,7 +555,7 @@ Deno.serve(async (req) => {
       const secret = req.headers.get("x-cron-secret") ?? "";
       const { data } = await admin.from("stash_cron").select("secret").limit(1).maybeSingle();
       if (!secret || !data || data.secret !== secret) throw new HttpError(401, "unauthorized");
-      return json(await shoot(null));
+      return json(await shootDue());
     }
 
     const who = await whoami(req, body);
