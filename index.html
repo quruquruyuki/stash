@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f3f2ee">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ストック">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>ストック</title>
+<style>
+:root{
+  --bg:#f3f2ee;--card:#fff;--ink:#1d1d1f;--mu:#7a7871;--line:#e3e1da;--soft:#ebe9e3;
+  --ac:#3346c8;--acs:#e8ebfb;--warn:#d4502b;--ok:#2f8a5b;
+  --r:16px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:15px;-webkit-text-size-adjust:100%}
+button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+input,textarea{font:inherit;color:var(--ink)}
+a{color:var(--ac)}
+.hidden{display:none!important}
+.mu{color:var(--mu)}
+
+/* auth */
+#auth{max-width:400px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 80px) 22px 40px}
+#auth h1{font-size:34px;margin:0 0 6px;letter-spacing:.04em}
+#auth p{color:var(--mu);font-size:13px;line-height:1.8}
+.field{width:100%;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:13px 14px;font-size:16px;margin-top:10px;outline:none}
+.field:focus{border-color:var(--ac)}
+.btn{display:block;width:100%;border:none;border-radius:12px;padding:14px;background:var(--ink);color:#fff;font-weight:600;margin-top:14px}
+.btn.ac{background:var(--ac)}
+.btn.ghost{background:var(--soft);color:var(--ink)}
+.btn:disabled{opacity:.5}
+.link{border:none;background:none;color:var(--ac);padding:10px 0;font-size:14px}
+
+/* layout */
+.view{max-width:720px;margin:0 auto;padding:calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 96px)}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.top h1{font-size:26px;margin:0;letter-spacing:.03em}
+.iconbtn{border:none;background:var(--card);border-radius:999px;width:38px;height:38px;display:grid;place-items:center;box-shadow:0 1px 0 var(--line)}
+.search{display:flex;gap:8px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px 4px 4px 12px}
+.search input{flex:1;border:none;outline:none;background:none;font-size:16px;padding:9px 0;min-width:0}
+.search button{border:none;border-radius:10px;padding:8px 12px;background:var(--soft);font-size:13px;white-space:nowrap}
+.search button.on{background:var(--ac);color:#fff}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:10px 0 4px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 12px;font-size:13px;color:var(--mu)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+
+/* list */
+.list{display:grid;gap:10px;margin-top:8px}
+.item{display:flex;gap:12px;background:var(--card);border-radius:var(--r);padding:12px;border:1px solid var(--line);text-align:left;width:100%}
+.item .th{flex:none;width:76px;height:76px;border-radius:10px;background:var(--soft) center/cover no-repeat;display:grid;place-items:center;font-size:12px;color:var(--mu);font-weight:600}
+.item .bd{min-width:0;flex:1}
+.item h3{font-size:15px;margin:0 0 3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.item .meta{font-size:12px;color:var(--mu);margin-bottom:4px}
+.item .sm{font-size:13px;color:#4a4944;line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.item.proc{opacity:.6}
+.item.err .meta{color:var(--warn)}
+.tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tag{font-size:11px;background:var(--acs);color:var(--ac);border-radius:6px;padding:2px 7px}
+.empty{text-align:center;color:var(--mu);padding:60px 20px;line-height:1.9;font-size:14px}
+.answer{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;margin-top:10px;line-height:1.8;white-space:pre-wrap}
+.answer .srcs{margin-top:10px;display:grid;gap:6px;white-space:normal}
+.answer .srcs button{border:none;background:var(--soft);border-radius:10px;padding:8px 10px;text-align:left;font-size:13px}
+
+/* tab bar */
+.tabbar{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:6px;padding:8px 12px calc(env(safe-area-inset-bottom) + 8px);background:rgba(243,242,238,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--line);z-index:20}
+.tabbar button{border:none;background:none;border-radius:12px;padding:8px 18px;font-size:13px;color:var(--mu);display:flex;flex-direction:column;align-items:center;gap:2px}
+.tabbar button.on{color:var(--ink);font-weight:600}
+.tabbar svg{width:22px;height:22px}
+.fab{position:fixed;right:18px;bottom:calc(env(safe-area-inset-bottom) + 76px);width:56px;height:56px;border-radius:50%;border:none;background:var(--ac);color:#fff;font-size:28px;box-shadow:0 6px 18px rgba(51,70,200,.35);z-index:21}
+
+/* sheets */
+.sheet{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;justify-content:center}
+.sheet .pane{background:var(--bg);width:100%;max-width:720px;max-height:92vh;overflow:auto;border-radius:20px 20px 0 0;padding:18px 18px calc(env(safe-area-inset-bottom) + 24px)}
+.sheet .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.sheet .head b{font-size:17px}
+.sheet .x{border:none;background:var(--soft);border-radius:999px;padding:6px 12px;font-size:13px}
+.row{display:flex;gap:8px}
+.row .btn{margin-top:10px}
+.pick{display:flex;gap:8px;margin-top:10px}
+.pick label{flex:1;text-align:center;border:1px dashed var(--line);border-radius:12px;padding:14px 6px;background:var(--card);font-size:13px;color:var(--mu)}
+.pick input{display:none}
+.preview{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.preview span{font-size:12px;background:var(--soft);border-radius:8px;padding:4px 8px}
+.detail h2{font-size:19px;line-height:1.45;margin:4px 0 6px}
+.detail .hero{width:100%;border-radius:12px;background:var(--soft);display:block;margin:8px 0;max-height:60vh;object-fit:contain}
+.detail .sum{line-height:1.8;background:var(--card);border-radius:12px;padding:12px 14px;border:1px solid var(--line)}
+.detail label.l{display:block;font-size:12px;color:var(--mu);margin:14px 0 2px}
+.acts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+.acts .btn{margin:0;padding:12px;font-size:14px}
+.btn.danger{background:#fbe9e4;color:var(--warn)}
+.kv{font-size:13px;color:var(--mu);margin-top:4px;word-break:break-all}
+.diff{margin-top:10px;font-size:13px;line-height:1.6;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;max-height:40vh;overflow:auto}
+.diff .a{color:var(--ok)}
+.diff .a::before{content:"＋ "}
+.diff .d{color:var(--warn);text-decoration:line-through}
+.diff .d::before{content:"－ "}
+.seg{display:inline-flex;background:var(--soft);border-radius:10px;padding:3px;margin-top:8px}
+.seg button{border:none;background:none;border-radius:8px;padding:6px 12px;font-size:13px;color:var(--mu)}
+.seg button.on{background:var(--card);color:var(--ink)}
+.code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;word-break:break-all;user-select:all;-webkit-user-select:all}
+.steps{font-size:13px;line-height:1.85;padding-left:20px}
+
+/* canvas */
+#canvasView{position:fixed;inset:0;overflow:hidden;background:
+  radial-gradient(circle,#d8d6cf 1px,transparent 1.2px) 0 0/24px 24px,var(--bg);touch-action:none}
+#world{position:absolute;left:0;top:0;transform-origin:0 0}
+.tile{position:absolute;background:var(--card);border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,.08),0 0 0 1px var(--line);overflow:hidden;display:flex;flex-direction:column}
+.tile .bar{flex:none;display:flex;align-items:center;gap:6px;padding:7px 10px;font-size:13px;border-bottom:1px solid var(--line);cursor:grab;background:#fafaf8}
+.tile .bar b{flex:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .bar .dot{width:8px;height:8px;border-radius:50%;background:var(--warn);flex:none}
+.tile .img{flex:1;background:var(--soft) top center/cover no-repeat;display:grid;place-items:center;color:var(--mu);font-size:12px;text-align:center;padding:6px}
+.tile .rz{position:absolute;right:0;bottom:0;width:26px;height:26px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 55%,#b9b6ad 55%,#b9b6ad 62%,transparent 62%,transparent 72%,#b9b6ad 72%,#b9b6ad 79%,transparent 79%)}
+.tile.changed{box-shadow:0 0 0 3px var(--warn),0 4px 14px rgba(212,80,43,.25)}
+.tile .when{font-size:11px;color:var(--mu);font-weight:400}
+.ctools{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:12px;right:12px;display:flex;gap:8px;align-items:center;z-index:10;pointer-events:none}
+.ctools > *{pointer-events:auto}
+.ctools h1{font-size:20px;margin:0 auto 0 4px;background:rgba(243,242,238,.85);padding:4px 10px;border-radius:10px}
+.pillbtn{border:none;background:var(--card);border-radius:999px;padding:9px 14px;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 150px);transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;border-radius:12px;padding:10px 16px;font-size:14px;opacity:0;transition:.25s;z-index:60;pointer-events:none;max-width:86vw;text-align:center}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<section id="auth" class="hidden">
+  <h1>ストック</h1>
+  <p id="authMsg">保存した記事・SNS・スクショ・論文を、あとで使える形にするアプリです。メールアドレスとパスワードでログインします。</p>
+  <form id="authForm">
+    <input class="field" id="email" type="email" autocomplete="email" placeholder="メールアドレス" required>
+    <input class="field" id="password" type="password" autocomplete="current-password" placeholder="パスワード" required minlength="6">
+    <button class="btn" id="authBtn" type="submit">ログイン</button>
+  </form>
+  <button class="link" id="authSwitch">はじめての方は新規登録</button>
+</section>
+
+<div id="app" class="hidden">
+  <!-- ストック一覧 -->
+  <section id="listView" class="view">
+    <div class="top">
+      <h1>ストック</h1>
+      <button class="iconbtn" id="openSettings" aria-label="設定"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    </div>
+    <form class="search" id="searchForm">
+      <input id="q" type="search" placeholder="意味で探す（例：睡眠に効く漢方の論文）" enterkeyhint="search">
+      <button type="button" id="askToggle">AIに質問</button>
+    </form>
+    <div class="chips" id="kindChips"></div>
+    <div class="chips" id="tagChips" style="padding-top:2px"></div>
+    <div id="answer"></div>
+    <div class="list" id="list"></div>
+  </section>
+
+  <!-- キャンバス -->
+  <section id="canvasView" class="hidden">
+    <div id="world"></div>
+    <div class="ctools">
+      <h1>キャンバス</h1>
+      <button class="pillbtn" id="fitBtn">全体</button>
+      <button class="pillbtn" id="shootAll">撮り直す</button>
+    </div>
+  </section>
+
+  <button class="fab" id="fab" aria-label="追加">＋</button>
+  <nav class="tabbar">
+    <button id="tabList" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>ストック</button>
+    <button id="tabCanvas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="7" rx="1.5"/><rect x="13" y="3" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="17" width="8" height="4" rx="1.5"/></svg>キャンバス</button>
+  </nav>
+</div>
+
+<!-- 追加 -->
+<div class="sheet hidden" id="addSheet">
+  <div class="pane">
+    <div class="head"><b id="addTitle">ストックに追加</b><button class="x" data-close>閉じる</button></div>
+    <textarea class="field" id="addText" rows="3" placeholder="URL か メモを貼り付け"></textarea>
+    <div class="pick" id="addPick">
+      <label>写真・スクショ<input type="file" id="addImg" accept="image/*" multiple></label>
+      <label>PDF・論文<input type="file" id="addPdf" accept="application/pdf"></label>
+    </div>
+    <div class="preview" id="addPrev"></div>
+    <input class="field" id="addMemo" placeholder="ひとことメモ（なくてOK）">
+    <button class="btn ac" id="addGo">保存する</button>
+  </div>
+</div>
+
+<!-- 詳細 -->
+<div class="sheet hidden" id="detailSheet">
+  <div class="pane detail" id="detailPane"></div>
+</div>
+
+<!-- タイル詳細 -->
+<div class="sheet hidden" id="tileSheet">
+  <div class="pane detail" id="tilePane"></div>
+</div>
+
+<!-- 設定 -->
+<div class="sheet hidden" id="settingsSheet">
+  <div class="pane">
+    <div class="head"><b>設定</b><button class="x" data-close>閉じる</button></div>
+    <p class="mu" style="font-size:13px;line-height:1.8;margin-top:0">iPhoneの共有ボタンから送れるように、ショートカット用のキーを作ります。作り直すと前のキーは使えなくなります。</p>
+    <button class="btn ghost" id="mkToken">ショートカット用のキーを作る</button>
+    <div id="tokenBox" class="hidden" style="margin-top:12px">
+      <div class="code" id="tokenVal"></div>
+      <button class="btn ghost" id="copyToken" style="margin-top:8px">キーをコピー</button>
+    </div>
+    <div style="margin-top:18px">
+      <b style="font-size:14px">ショートカットの作り方</b>
+      <ol class="steps">
+        <li>「ショートカット」アプリで新規作成し、詳細設定で「共有シートに表示」をオン。受け取る種類は「URL・テキスト・画像・PDF」</li>
+        <li>アクション「URLの内容を取得」を追加し、URLに下の送り先を入れる</li>
+        <li>方法を「POST」、ヘッダに <code>x-stash-token</code> ＝ 作ったキー</li>
+        <li>本文を「JSON」にして、キー <code>text</code> に「ショートカットの入力」を入れる</li>
+        <li>写真も送りたいときは、先に「Base64エンコード」で入力を変換し、キー <code>image</code> に入れる分岐を作る</li>
+        <li>最後に「通知を表示」で結果の <code>title</code> を出すと、保存できたか分かります</li>
+      </ol>
+      <div class="code" id="endpoint"></div>
+      <p class="mu" style="font-size:12px;line-height:1.7">ショートカットを作らなくても、Safariで <code>このアプリのURL?add=保存したいURL</code> を開けば保存されます。</p>
+    </div>
+    <button class="btn ghost" id="logout" style="margin-top:20px">ログアウト</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
