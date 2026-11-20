@@ -294,15 +294,24 @@ function saveView() { try { localStorage.setItem(VIEW_KEY, JSON.stringify(view))
 applyView();
 
 async function loadTiles() {
-  const { data, error } = await sb.from("stash_tiles").select("id,item_id,url,title,x,y,w,h,shot_path,prev_shot_path,shot_at,changes,changed_at,unseen,error,active,crop_y,watch_from,watch_to,view_mode,excerpt").order("created_at");
+  const { data, error } = await sb.from("stash_tiles").select("id,item_id,url,title,x,y,w,h,shot_path,prev_shot_path,shot_at,changes,changed_at,unseen,error,active,crop_y,watch_from,watch_to,view_mode,excerpt,crop").order("created_at");
   if (error) { toast("キャンバスを読み込めませんでした"); return; }
   tiles = data || [];
   await ensureUrls(tiles.map(t => t.shot_path));
   renderTiles();
 }
+
+const BAR_H = 33; // タイルのタイトル部分の高さ
+// 切り抜き（ページ幅を1とした x, y, w, h）をタイルに表示するための img のスタイル
+function cropStyle(t) {
+  const c = t.crop;
+  if (!c || !c.w) return `margin-top:-${(t.crop_y || 0) * 100}%`;
+  // 縦方向の margin の % は「幅」基準なので、幅を1とした座標がそのまま使える
+  return `width:${100 / c.w}%;max-width:none;margin-left:-${(c.x / c.w) * 100}%;margin-top:-${(c.y / c.w) * 100}%`;
+}
 function tileHtml(t) {
   const img = urls[t.shot_path];
-  const body = t.view_mode === "text" ? `<div class="txt">${t.excerpt ? esc(t.excerpt) : "まだ文字を取れていません"}</div>` : img ? `<div class="shot"><img src="${esc(img)}" alt="" draggable="false" style="transform:translateY(-${(t.crop_y || 0) * 100}%)"></div>`
+  const body = t.view_mode === "text" ? `<div class="txt">${t.excerpt ? esc(t.excerpt) : "まだ文字を取れていません"}</div>` : img ? `<div class="shot"><img src="${esc(img)}" alt="" draggable="false" style="${cropStyle(t)}"></div>`
     : `<div class="img">${t.error ? esc(t.error) : t.shot_at ? "スクショなし" : `<span><span class="spin"></span><br>撮影中…</span>`}</div>`;
   return `<div class="tile ${t.unseen ? "changed" : ""}" data-tile="${t.id}" style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px">
     <div class="bar">${t.unseen ? `<span class="dot"></span>` : ""}<b>${esc(t.title || t.url)}</b><span class="when">${t.unseen ? "変化あり" : fmtWhen(t.shot_at)}</span></div>
@@ -392,7 +401,13 @@ cv.addEventListener("pointermove", e => {
   if (Math.abs(dx) + Math.abs(dy) > 6) g.moved = true;
   if (g.mode === "pan") { view.x = g.vx + dx; view.y = g.vy + dy; applyView(); }
   else if (g.mode === "drag") { g.t.x = Math.round(g.x0 + dx / view.s); g.t.y = Math.round(g.y0 + dy / view.s); g.el.style.left = g.t.x + "px"; g.el.style.top = g.t.y + "px"; }
-  else if (g.mode === "resize") { g.t.w = Math.max(200, Math.round(g.w0 + dx / view.s)); g.t.h = Math.max(150, Math.round(g.h0 + dy / view.s)); g.el.style.width = g.t.w + "px"; g.el.style.height = g.t.h + "px"; }
+  else if (g.mode === "resize") {
+    const c = g.t.view_mode !== "text" && g.t.crop;
+    g.t.w = Math.max(c ? 120 : 200, Math.round(g.w0 + dx / view.s));
+    // 切り抜いたタイルは形を保ったまま拡大・縮小（＝倍率の変更）
+    g.t.h = c ? Math.round(BAR_H + g.t.w * c.h / c.w) : Math.max(150, Math.round(g.h0 + dy / view.s));
+    g.el.style.width = g.t.w + "px"; g.el.style.height = g.t.h + "px";
+  }
 });
 function endPointer(e) {
   if (!pts.has(e.pointerId)) return;
@@ -438,7 +453,7 @@ async function openTile(t) {
     <div class="acts">
       <a class="btn ac" href="${esc(t.url)}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">サイトを開く</a>
       <button class="btn ghost" id="tShoot">撮り直す</button>
-      ${t.view_mode !== "text" && urls[t.shot_path] ? `<button class="btn ghost" id="tCrop">表示する位置を選ぶ</button>` : ""}
+      ${t.view_mode !== "text" && urls[t.shot_path] ? `<button class="btn ghost" id="tCrop">表示する範囲を選ぶ</button>` : ""}
       <button class="btn ghost" id="tMode">${t.view_mode === "text" ? "スクショで表示" : "文字で表示"}</button>
       <button class="btn ghost" id="tWatch">見張る範囲を選ぶ</button>
       ${!t.item_id && !items.some(i => i.url === t.url) ? `<button class="btn ghost" id="tStock">ストックにも保存</button>` : ""}
@@ -483,27 +498,106 @@ async function openTile(t) {
   };
 }
 
-// 表示する位置：ページ全体のスクショをスクロールして、タイルに出したいところで決める
+// 表示する範囲：ページ全体のスクショの上で枠を動かして、タイルに出す部分を切り抜く
+// ・1本指で画像を動かす　・2本指で拡大縮小　・枠の四隅で枠の形を変える
 function pickCrop(t) {
   $("tilePane").innerHTML = `
-    <div class="head"><b>表示する位置を選ぶ</b><button class="x" data-close>閉じる</button></div>
-    <p class="mu" style="font-size:13px;margin:0 0 8px">見たいところが枠の一番上に来るようにスクロールして「ここにする」を押してください。</p>
-    <div id="cropBox" style="height:58vh;overflow:auto;border-radius:12px;border:2px solid var(--ac);background:var(--soft);-webkit-overflow-scrolling:touch">
-      <img id="cropImg" src="${esc(urls[t.shot_path])}" style="width:100%;display:block" alt="">
+    <div class="head"><b>表示する範囲を選ぶ</b><button class="x" data-close>閉じる</button></div>
+    <p class="mu" style="font-size:13px;margin:0 0 8px;line-height:1.7">1本指でページを動かし、2本指で拡大縮小。青い枠の四隅を引っぱると枠の形が変わります。枠の中がタイルに表示されます。</p>
+    <div id="cStage" style="position:relative;height:60vh;overflow:hidden;border-radius:12px;background:#d9d7d0;touch-action:none">
+      <img id="cImg" src="${esc(urls[t.shot_path])}" draggable="false" style="position:absolute;left:0;top:0;transform-origin:0 0;max-width:none;user-select:none;-webkit-user-select:none;pointer-events:none" alt="">
+      <div id="cFrame" style="position:absolute;border:2px solid var(--ac);box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none">
+        ${["tl", "tr", "bl", "br"].map(k => `<div data-h="${k}" style="position:absolute;width:30px;height:30px;${k[0] === "t" ? "top" : "bottom"}:-15px;${k[1] === "l" ? "left" : "right"}:-15px;background:var(--ac);border:3px solid #fff;border-radius:50%;pointer-events:auto"></div>`).join("")}
+      </div>
     </div>
-    <div class="row"><button class="btn ghost" id="cropTop">一番上に戻す</button><button class="btn ac" id="cropOk">ここにする</button></div>`;
-  const box = $("cropBox"), img = $("cropImg");
-  const go = () => { box.scrollTop = (t.crop_y || 0) * img.offsetHeight; };
-  if (img.complete) go(); else img.onload = go;
-  const save = async y => {
-    t.crop_y = Math.max(0, Math.min(0.98, y));
-    const { error } = await sb.from("stash_tiles").update({ crop_y: t.crop_y }).eq("id", t.id);
-    if (error) { toast("保存できませんでした"); return; }
-    const el = tileEl(t.id); if (el) el.outerHTML = tileHtml(t);
-    closeSheet("tileSheet"); toast("表示する位置を変えました");
+    <div class="row"><button class="btn ghost" id="cReset">切り抜かない</button><button class="btn ac" id="cOk">この範囲にする</button></div>`;
+  const stage = $("cStage"), img = $("cImg"), frame = $("cFrame");
+  let W = 0, H = 0, sw = 0, shh = 0, iv = { x: 0, y: 0, s: 1 }, fr = { x: 0, y: 0, w: 0, h: 0 };
+  const draw = () => {
+    img.style.transform = `translate(${iv.x}px,${iv.y}px) scale(${iv.s})`;
+    Object.assign(frame.style, { left: fr.x + "px", top: fr.y + "px", width: fr.w + "px", height: fr.h + "px" });
   };
-  $("cropOk").onclick = () => save(img.offsetHeight ? box.scrollTop / img.offsetHeight : 0);
-  $("cropTop").onclick = () => save(0);
+  const init = () => {
+    W = img.naturalWidth; H = img.naturalHeight; sw = stage.clientWidth; shh = stage.clientHeight;
+    const c = t.crop;
+    if (c && c.w) {
+      // 前の切り抜きが枠に収まるように表示
+      const pad = 24, s = Math.min((sw - pad * 2) / (c.w * W), (shh - pad * 2) / (c.h * W));
+      iv.s = s; fr.w = c.w * W * s; fr.h = c.h * W * s; fr.x = (sw - fr.w) / 2; fr.y = (shh - fr.h) / 2;
+      iv.x = fr.x - c.x * W * s; iv.y = fr.y - c.y * W * s;
+    } else {
+      iv.s = sw / W; iv.x = 0; iv.y = -((t.crop_y || 0) * H * iv.s);
+      fr = { x: 16, y: 16, w: sw - 32, h: Math.min(shh - 32, (sw - 32) * 0.6) };
+    }
+    draw();
+  };
+  if (img.complete && img.naturalWidth) init(); else img.onload = init;
+
+  const pts = new Map(); let g = null;
+  stage.addEventListener("pointerdown", e => {
+    stage.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const r = stage.getBoundingClientRect();
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()];
+      const cx = (a.x + b.x) / 2 - r.left, cy = (a.y + b.y) / 2 - r.top;
+      g = { m: "pinch", d0: Math.hypot(a.x - b.x, a.y - b.y), s0: iv.s, px: (cx - iv.x) / iv.s, py: (cy - iv.y) / iv.s, r };
+      return;
+    }
+    const h = e.target.closest("[data-h]");
+    g = h ? { m: "frame", k: h.dataset.h, sx: e.clientX, sy: e.clientY, f0: { ...fr } } : { m: "pan", sx: e.clientX, sy: e.clientY, x0: iv.x, y0: iv.y };
+  });
+  stage.addEventListener("pointermove", e => {
+    if (!pts.has(e.pointerId) || !g) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (g.m === "pinch" && pts.size >= 2) {
+      const [a, b] = [...pts.values()];
+      const cx = (a.x + b.x) / 2 - g.r.left, cy = (a.y + b.y) / 2 - g.r.top;
+      iv.s = Math.min(8, Math.max(0.05, g.s0 * Math.hypot(a.x - b.x, a.y - b.y) / g.d0));
+      iv.x = cx - g.px * iv.s; iv.y = cy - g.py * iv.s; draw(); return;
+    }
+    const dx = e.clientX - g.sx, dy = e.clientY - g.sy;
+    if (g.m === "pan") { iv.x = g.x0 + dx; iv.y = g.y0 + dy; draw(); return; }
+    if (g.m === "frame") {
+      const f = { ...g.f0 }, MIN = 40;
+      if (g.k[1] === "l") { f.x = Math.min(g.f0.x + g.f0.w - MIN, Math.max(0, g.f0.x + dx)); f.w = g.f0.x + g.f0.w - f.x; }
+      else f.w = Math.max(MIN, Math.min(sw - g.f0.x, g.f0.w + dx));
+      if (g.k[0] === "t") { f.y = Math.min(g.f0.y + g.f0.h - MIN, Math.max(0, g.f0.y + dy)); f.h = g.f0.y + g.f0.h - f.y; }
+      else f.h = Math.max(MIN, Math.min(shh - g.f0.y, g.f0.h + dy));
+      fr = f; draw();
+    }
+  });
+  const up = e => { pts.delete(e.pointerId); if (pts.size === 0) g = null; else if (g?.m === "pinch") g = null; };
+  stage.addEventListener("pointerup", up); stage.addEventListener("pointercancel", up);
+  stage.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = stage.getBoundingClientRect(), cx = e.clientX - r.left, cy = e.clientY - r.top;
+    const px = (cx - iv.x) / iv.s, py = (cy - iv.y) / iv.s;
+    iv.s = Math.min(8, Math.max(0.05, iv.s * Math.exp(-e.deltaY * 0.002)));
+    iv.x = cx - px * iv.s; iv.y = cy - py * iv.s; draw();
+  }, { passive: false });
+
+  const save = async crop => {
+    const patch = { crop };
+    if (crop) patch.h = Math.round(BAR_H + t.w * crop.h / crop.w);
+    else patch.crop_y = 0;
+    const { error } = await sb.from("stash_tiles").update(patch).eq("id", t.id);
+    if (error) { toast("保存できませんでした"); return; }
+    Object.assign(t, patch);
+    const el = tileEl(t.id); if (el) el.outerHTML = tileHtml(t);
+    closeSheet("tileSheet"); toast(crop ? "この範囲を表示します。右下の角で大きさを変えられます" : "ページの上から表示します");
+  };
+  $("cOk").onclick = () => {
+    if (!W) return;
+    // 枠をページの座標に直す（ページ幅を1とする）
+    const k = 1 / (W * iv.s);
+    let x = (fr.x - iv.x) * k, y = (fr.y - iv.y) * k, w = fr.w * k, h = fr.h * k;
+    const maxY = H / W;
+    x = Math.max(0, Math.min(1 - 0.02, x)); y = Math.max(0, Math.min(maxY - 0.02, y));
+    w = Math.min(1 - x, w); h = Math.min(maxY - y, h);
+    save({ x: +x.toFixed(4), y: +y.toFixed(4), w: +w.toFixed(4), h: +h.toFixed(4) });
+  };
+  $("cReset").onclick = () => save(null);
 }
 
 // 見張る範囲：ページの文字の中から「ここから」「ここまで」の行を選ぶ
